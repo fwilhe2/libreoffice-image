@@ -8,12 +8,20 @@ on:
     - cron:  '30 5 * * *'
 
 permissions:
-  # Push container images
+  contents: read
   packages: write
 
 jobs:
-  container-image:
-    runs-on: ubuntu-24.04
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     env:
       IMAGE_NAME_ORG: fwilhe2
       IMAGE_NAME: libreoffice
@@ -23,31 +31,52 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v7
 
-      - name: Install qemu dependency for multi-arch build
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Build Image
-        id: build_image
-        uses: redhat-actions/buildah-build@v3
-        with:
-          image: ${{ env.IMAGE_NAME_ORG }}/${{ env.IMAGE_NAME }}
-          tags: ${{ env.IMAGE_TAG }}
-          platforms: linux/amd64, linux/arm64
-          containerfiles: |
-            ./Containerfile
-
-      - name: Print LibreOffice Version
-        run: podman run -t --rm ${{ env.IMAGE_NAME_ORG }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} libreoffice --version
-
-      - name: Push To ghcr.io
-        id: push-to-ghcr
+      - name: Log in to ghcr.io
         if: ${{ github.event_name != 'pull_request' }}
-        uses: redhat-actions/push-to-registry@v3
+        uses: docker/login-action@v3
         with:
-          image: ${{ steps.build_image.outputs.image }}
-          tags: ${{ steps.build_image.outputs.tags }}
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Containerfile
+          platforms: linux/${{ matrix.arch }}
+          tags: ghcr.io/${{ env.IMAGE_NAME_ORG }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-${{ matrix.arch }}
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          cache-from: type=gha,scope=libreoffice-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=libreoffice-${{ matrix.arch }}
+
+      - name: Print LibreOffice Version
+        run: docker run --rm ghcr.io/${{ env.IMAGE_NAME_ORG }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-${{ matrix.arch }} libreoffice --version
+
+  publish-manifest:
+    if: ${{ github.event_name != 'pull_request' }}
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      IMAGE: ghcr.io/fwilhe2/libreoffice
+    steps:
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-arch manifest
+        run: |
+          docker buildx imagetools create \
+            --tag "$IMAGE:latest" \
+            "$IMAGE:latest-amd64" \
+            "$IMAGE:latest-arm64"

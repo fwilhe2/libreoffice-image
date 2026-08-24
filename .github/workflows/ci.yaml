@@ -49,13 +49,16 @@ jobs:
           file: ./Containerfile
           platforms: linux/${{ matrix.arch }}
           tags: ghcr.io/${{ env.IMAGE_NAME_ORG }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-${{ matrix.arch }}
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          load: true
           cache-from: type=gha,scope=libreoffice-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=libreoffice-${{ matrix.arch }}
 
       - name: Print LibreOffice Version
         run: docker run --rm ghcr.io/${{ env.IMAGE_NAME_ORG }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-${{ matrix.arch }} libreoffice --version
+
+      - name: Push architecture image
+        if: ${{ github.event_name != 'pull_request' }}
+        run: docker push ghcr.io/${{ env.IMAGE_NAME_ORG }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-${{ matrix.arch }}
 
   publish-manifest:
     if: ${{ github.event_name != 'pull_request' }}

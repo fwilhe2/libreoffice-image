@@ -56,6 +56,18 @@ jobs:
       - name: Print LibreOffice Version
         run: docker run --rm ghcr.io/${{ env.IMAGE_NAME_ORG }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-${{ matrix.arch }} libreoffice --version
 
+      - name: Check Liberation fonts
+        # LibreOffice falls back to DejaVu without a word, so check the faces resolve to
+        # themselves rather than trusting the package list.
+        run: |
+          docker run --rm ghcr.io/${{ env.IMAGE_NAME_ORG }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-${{ matrix.arch }} sh -euc '
+            for f in "Liberation Serif" "Liberation Sans" "Liberation Mono"; do
+              got=$(fc-match -f "%{family[0]}" "$f")
+              echo "$f -> $got"
+              [ "$got" = "$f" ]
+            done
+          '
+
       - name: Push architecture image
         if: ${{ github.event_name != 'pull_request' }}
         run: docker push ghcr.io/${{ env.IMAGE_NAME_ORG }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-${{ matrix.arch }}
